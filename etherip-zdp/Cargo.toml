@@ -23,6 +23,8 @@ tokio = { workspace = true, features = [
 ] }
 clap = { workspace = true, features = ["derive"] }
 pnet = "0.35.0"
+rtnetlink = "0.16.0"
+futures = "0.3.31"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

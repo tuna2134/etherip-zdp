@@ -3,6 +3,7 @@ use aya::programs::{Xdp, XdpFlags};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
+use futures::TryStreamExt;
 use tokio::signal;
 mod mac;
 
@@ -17,6 +18,29 @@ struct Opt {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
+    let Opt { iface, src_addr } = opt;
+    let (conn, handle, _) = rtnetlink::new_connection()?;
+    tokio::spawn(conn);
+    let mut addresses = handle
+        .address()
+        .get()
+        .set_address_filter(src_addr.parse()?)
+        .execute();
+    let a_msg = loop {
+        if let Some(msg) = addresses.try_next().await? {
+            break msg;
+        }
+    };
+    let mut links = handle
+        .link()
+        .get()
+        .match_index(a_msg.header.index)
+        .execute();
+    let l_msg = loop {
+        if let Some(msg) = links.try_next().await? {
+            break msg;
+        }
+    };
 
     env_logger::init();
 
@@ -34,12 +58,8 @@ async fn main() -> anyhow::Result<()> {
         "/etherip-zdp"
     )))?;
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
-        // This can happen if you remove all log statements from your eBPF program.
         warn!("failed to initialize eBPF logger: {e}");
     }
-    let Opt { iface, src_addr } = opt;
-    let addr = mac::get_mac(&iface, src_addr.parse()?).unwrap();
-    println!("{addr}");
     let program: &mut Xdp = ebpf.program_mut("etherip_zdp").unwrap().try_into()?;
     program.load()?;
     program.attach(&iface, XdpFlags::default())
