@@ -1,16 +1,15 @@
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use aya::programs::{Xdp, XdpFlags};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
 use futures::TryStreamExt;
+use rtnetlink::packet_route::link::LinkAttribute;
 use tokio::signal;
 mod mac;
 
 #[derive(Debug, Parser)]
 struct Opt {
-    #[clap(short, long, default_value = "eth0")]
-    iface: String,
     #[clap(short, long)]
     src_addr: String,
 }
@@ -18,7 +17,7 @@ struct Opt {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    let Opt { iface, src_addr } = opt;
+    let Opt { src_addr } = opt;
     let (conn, handle, _) = rtnetlink::new_connection()?;
     tokio::spawn(conn);
     let mut addresses = handle
@@ -36,11 +35,20 @@ async fn main() -> anyhow::Result<()> {
         .get()
         .match_index(a_msg.header.index)
         .execute();
-    let l_msg = loop {
-        if let Some(msg) = links.try_next().await? {
-            break msg;
+    let ifname = loop {
+        match links.try_next().await? {
+            Some(msg) => {
+                if let Some(name) = msg.attributes.into_iter().find_map(|attr| match attr {
+                    LinkAttribute::IfName(name) => Some(name),
+                    _ => None,
+                }) {
+                    break Some(name);
+                }
+            }
+            None => break None,
         }
     };
+    let ifname = ifname.map_or_else(|| Err(anyhow!("Not found")), |x| Ok(x))?;
 
     env_logger::init();
 
@@ -62,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let program: &mut Xdp = ebpf.program_mut("etherip_zdp").unwrap().try_into()?;
     program.load()?;
-    program.attach(&iface, XdpFlags::default())
+    program.attach(&ifname, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
     let ctrl_c = signal::ctrl_c();

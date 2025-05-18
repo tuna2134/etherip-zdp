@@ -8,7 +8,7 @@ members = [
 default-members = ["etherip-zdp", "etherip-zdp-common"]
 
 [workspace.package]
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [workspace.dependencies]
 aya = { version = "0.13.1", default-features = false }

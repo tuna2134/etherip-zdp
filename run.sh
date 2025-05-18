@@ -1,1 +1,2 @@
-cargo run -r --config 'target."cfg(all())".runner="sudo -E"' -- --iface="eth0" --src-addr=172.29.215.214
+
+cargo run -r --config 'target."cfg(all())".runner="sudo -E"' -- --src-addr=fe80::215:5dff:fe0a:5199
