@@ -7,5 +7,7 @@ sudo ip link set up dev test1-veth0
 sudo ip netns exec host1 ip link set up dev test2-veth0
 sudo ip tuntap add mode tap dev tap0
 sudo ip link set up dev tap0
-sudo ip a add 192.168.1.1/24 dev tap0
+sudo ip link add name br0 type bridge
+sudo ip a add 192.168.1.1/24 dev br0
+sudo ip link set dev tap0 master br0
 RUST_LOG=info cargo run -r --config 'target."cfg(all())".runner="sudo -E"' -- --src-addr=fd20::1 --dst-addr=fd20::2 --device=tap0

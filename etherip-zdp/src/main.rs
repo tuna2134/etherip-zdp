@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context as _};
 use aya::{
-    maps::HashMap,
+    maps::{DevMap, HashMap},
     programs::{Xdp, XdpFlags},
 };
 use clap::Parser;
@@ -64,6 +64,16 @@ async fn main() -> anyhow::Result<()> {
 
     let (src_macaddress, dst_macaddress) = get_mac(&ifname, dst_addr.parse()?).unwrap();
 
+    let device_index = {
+        let mut links = handle.link().get().match_name(device.clone()).execute();
+        let msg = loop {
+            if let Some(msg) = links.try_next().await? {
+                break msg;
+            }
+        };
+        msg.header.index
+    };
+
     env_logger::init();
 
     let rlim = libc::rlimit {
@@ -82,15 +92,27 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         warn!("failed to initialize eBPF logger: {e}");
     }
-    let program: &mut Xdp = ebpf.program_mut("encap").unwrap().try_into()?;
-    program.load()?;
-    program.attach(&device, XdpFlags::default())
+    let encap_program: &mut Xdp = ebpf.program_mut("encap").unwrap().try_into()?;
+    encap_program.load()?;
+    encap_program.attach(&device, XdpFlags::default())
+        .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
+
+    let decap_program: &mut Xdp = ebpf.program_mut("decap").unwrap().try_into()?;
+    decap_program.load()?;
+    decap_program.attach(&ifname, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
     let mut macaddress: HashMap<_, u32, [u8; 6]> =
         HashMap::try_from(ebpf.map_mut("MACADDRESS").unwrap())?;
     macaddress.insert(0, src_macaddress.octets(), 0)?;
     macaddress.insert(1, dst_macaddress.octets(), 0)?;
+    let mut ipaddress: HashMap<_, u32, [u8; 16]> =
+        HashMap::try_from(ebpf.map_mut("IPADDRESS").unwrap())?;
+    ipaddress.insert(0, src_addr.parse::<std::net::Ipv6Addr>()?.octets(), 0)?;
+    ipaddress.insert(1, dst_addr.parse::<std::net::Ipv6Addr>()?.octets(), 0)?;
+    let mut dev_map: DevMap<_> = DevMap::try_from(ebpf.map_mut("DEV_MAP").unwrap())?;
+    dev_map.set(0, a_msg.header.index, None, 0)?;
+    dev_map.set(1, device_index, None, 0)?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
