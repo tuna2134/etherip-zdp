@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
             None => break None,
         }
     };
-    let ifname = ifname.map_or_else(|| Err(anyhow!("Not found")), |x| Ok(x))?;
+    let ifname = ifname.map_or_else(|| Err(anyhow!("Not found")), Ok)?;
 
     let (src_macaddress, dst_macaddress) = get_mac(&ifname, dst_addr.parse()?).unwrap();
 
