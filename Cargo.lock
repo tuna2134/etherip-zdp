@@ -384,6 +384,7 @@ dependencies = [
  "log",
  "pnet",
  "rtnetlink",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
@@ -401,6 +402,7 @@ dependencies = [
  "aya-ebpf",
  "aya-log-ebpf",
  "etherip-zdp-common",
+ "network-types",
  "which",
 ]
 
@@ -670,6 +672,12 @@ dependencies = [
  "log",
  "tokio",
 ]
+
+[[package]]
+name = "network-types"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2df15b1cb023b9d205ae287d5dbe74510ae4d62b5131ceec516f4913ed05230"
 
 [[package]]
 name = "nix"

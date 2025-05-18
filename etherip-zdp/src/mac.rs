@@ -34,7 +34,7 @@ const PKT_NDP_OFFSET: usize = PKT_IP6_OFFSET + PKT_IP6_SIZE;
 const PKT_MIN_ARP_RESP_SIZE: usize = PKT_ETH_SIZE + PKT_ARP_SIZE;
 const PKT_MIN_NDP_RESP_SIZE: usize = PKT_ETH_SIZE + PKT_IP6_SIZE + PKT_NDP_ADV_SIZE;
 
-pub fn get_mac(ifname: &str, ip: IpAddr) -> Result<MacAddr, Error> {
+pub fn get_mac(ifname: &str, ip: IpAddr) -> Result<(MacAddr, MacAddr), Error> {
     let interfaces = pnet::datalink::interfaces();
 
     let interface = interfaces
@@ -44,10 +44,11 @@ pub fn get_mac(ifname: &str, ip: IpAddr) -> Result<MacAddr, Error> {
 
     println!("Source MAC address: {}", interface.mac.unwrap());
 
-    match ip {
-        IpAddr::V4(ipv4) => get_mac_via_arp(&interface, ipv4),
-        IpAddr::V6(ipv6) => get_mac_via_ndp(&interface, ipv6),
-    }
+    let dst = match ip {
+        IpAddr::V4(ipv4) => get_mac_via_arp(&interface, ipv4)?,
+        IpAddr::V6(ipv6) => get_mac_via_ndp(&interface, ipv6)?,
+    };
+    Ok((interface.mac.unwrap(), dst))
 }
 
 /// Use ARP to locate the MAC of an IPv4 address

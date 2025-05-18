@@ -1,9 +1,13 @@
 use anyhow::{anyhow, Context as _};
-use aya::programs::{Xdp, XdpFlags};
+use aya::{
+    maps::HashMap,
+    programs::{Xdp, XdpFlags},
+};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
 use futures::TryStreamExt;
+use mac::get_mac;
 use rtnetlink::packet_route::link::LinkAttribute;
 use tokio::signal;
 mod mac;
@@ -12,12 +16,20 @@ mod mac;
 struct Opt {
     #[clap(short, long)]
     src_addr: String,
+    #[clap(short, long)]
+    dst_addr: String,
+    #[clap(short, long)]
+    device: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    let Opt { src_addr } = opt;
+    let Opt {
+        src_addr,
+        dst_addr,
+        device,
+    } = opt;
     let (conn, handle, _) = rtnetlink::new_connection()?;
     tokio::spawn(conn);
     let mut addresses = handle
@@ -50,6 +62,8 @@ async fn main() -> anyhow::Result<()> {
     };
     let ifname = ifname.map_or_else(|| Err(anyhow!("Not found")), |x| Ok(x))?;
 
+    let (src_macaddress, dst_macaddress) = get_mac(&ifname, dst_addr.parse()?).unwrap();
+
     env_logger::init();
 
     let rlim = libc::rlimit {
@@ -68,10 +82,15 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         warn!("failed to initialize eBPF logger: {e}");
     }
-    let program: &mut Xdp = ebpf.program_mut("etherip_zdp").unwrap().try_into()?;
+    let program: &mut Xdp = ebpf.program_mut("encap").unwrap().try_into()?;
     program.load()?;
-    program.attach(&ifname, XdpFlags::default())
+    program.attach(&device, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
+
+    let mut macaddress: HashMap<_, u32, [u8; 6]> =
+        HashMap::try_from(ebpf.map_mut("MACADDRESS").unwrap())?;
+    macaddress.insert(0, src_macaddress.octets(), 0)?;
+    macaddress.insert(1, dst_macaddress.octets(), 0)?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
