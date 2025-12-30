@@ -1,5 +1,18 @@
 # etherip-zdp
 
+EtherIP (RFC 3378) implementation using Rust and eBPF/XDP with Aya-rs.
+
+## Features
+
+- **RFC 3378 Compliant**: Implements EtherIP protocol specification
+- **Dual Stack Support**: Works with both IPv4 and IPv6 tunnel endpoints
+- **High Performance**: Uses eBPF/XDP for kernel-space packet processing
+- **Router Traversal**: Works across routers with standard IP routing
+- **Fragmentation Support**: Handles IP fragmentation transparently
+- **Zero-Copy**: Leverages XDP for efficient packet processing
+
+For details on RFC 3378 compliance, see [RFC3378_COMPLIANCE.md](RFC3378_COMPLIANCE.md).
+
 ## Prerequisites
 
 1. stable rust toolchains: `rustup toolchain install stable`
@@ -13,9 +26,21 @@
 
 Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
 
+### IPv6 Example
+
 ```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- \
+  --src-addr=fd20::1 --dst-addr=fd20::2 --device=tap0
 ```
+
+### IPv4 Example
+
+```shell
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- \
+  --src-addr=192.168.1.1 --dst-addr=192.168.1.2 --device=tap0
+```
+
+The program automatically detects whether to use IPv4 or IPv6 based on the address format.
 
 Cargo build scripts are used to automatically build the eBPF correctly and include it in the
 program.

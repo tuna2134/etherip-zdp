@@ -10,6 +10,7 @@ use futures::TryStreamExt;
 use mac::get_mac;
 use rtnetlink::packet_route::link::LinkAttribute;
 use tokio::signal;
+use std::net::IpAddr;
 mod mac;
 
 #[derive(Debug, Parser)]
@@ -106,10 +107,46 @@ async fn main() -> anyhow::Result<()> {
         HashMap::try_from(ebpf.map_mut("MACADDRESS").unwrap())?;
     macaddress.insert(0, src_macaddress.octets(), 0)?;
     macaddress.insert(1, dst_macaddress.octets(), 0)?;
+    
+    // Parse addresses to determine IP version
+    let src_ip: IpAddr = src_addr.parse()?;
+    let dst_ip: IpAddr = dst_addr.parse()?;
+    
+    // Determine if we're using IPv4 or IPv6
+    let is_ipv4 = matches!(src_ip, IpAddr::V4(_)) && matches!(dst_ip, IpAddr::V4(_));
+    
+    // Store IP addresses (padded to 16 bytes)
     let mut ipaddress: HashMap<_, u32, [u8; 16]> =
         HashMap::try_from(ebpf.map_mut("IPADDRESS").unwrap())?;
-    ipaddress.insert(0, src_addr.parse::<std::net::Ipv6Addr>()?.octets(), 0)?;
-    ipaddress.insert(1, dst_addr.parse::<std::net::Ipv6Addr>()?.octets(), 0)?;
+    
+    let src_ip_bytes = match src_ip {
+        IpAddr::V4(addr) => {
+            let mut bytes = [0u8; 16];
+            bytes[0..4].copy_from_slice(&addr.octets());
+            bytes
+        }
+        IpAddr::V6(addr) => addr.octets(),
+    };
+    
+    let dst_ip_bytes = match dst_ip {
+        IpAddr::V4(addr) => {
+            let mut bytes = [0u8; 16];
+            bytes[0..4].copy_from_slice(&addr.octets());
+            bytes
+        }
+        IpAddr::V6(addr) => addr.octets(),
+    };
+    
+    ipaddress.insert(0, src_ip_bytes, 0)?;
+    ipaddress.insert(1, dst_ip_bytes, 0)?;
+    
+    // Set IP version flag (0 = IPv4, 1 = IPv6)
+    let mut ip_version: HashMap<_, u32, u8> =
+        HashMap::try_from(ebpf.map_mut("IP_VERSION").unwrap())?;
+    ip_version.insert(0, if is_ipv4 { 0 } else { 1 }, 0)?;
+    
+    println!("Using {} for tunnel encapsulation", if is_ipv4 { "IPv4" } else { "IPv6" });
+    
     let mut dev_map: DevMap<_> = DevMap::try_from(ebpf.map_mut("DEV_MAP").unwrap())?;
     dev_map.set(0, a_msg.header.index, None, 0)?;
     dev_map.set(1, device_index, None, 0)?;
