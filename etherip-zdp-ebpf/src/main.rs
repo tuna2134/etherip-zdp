@@ -64,6 +64,9 @@ fn try_encap(ctx: XdpContext) -> Result<u32, ()> {
 }
 
 fn try_encap_ipv4(ctx: XdpContext) -> Result<u32, ()> {
+    // RFC 3378: Add EtherIP header (2 bytes) + IPv4 header (20 bytes) + Ethernet header (14 bytes)
+    // Total overhead: 36 bytes
+    // Note: Large packets may be fragmented by the IP layer if they exceed MTU
     unsafe {
         let x = bpf_xdp_adjust_head(
             ctx.ctx,
@@ -128,6 +131,9 @@ fn try_encap_ipv4(ctx: XdpContext) -> Result<u32, ()> {
 }
 
 fn try_encap_ipv6(ctx: XdpContext) -> Result<u32, ()> {
+    // RFC 3378: Add EtherIP header (2 bytes) + IPv6 header (40 bytes) + Ethernet header (14 bytes)
+    // Total overhead: 56 bytes
+    // Note: Large packets may be fragmented by the IP layer if they exceed MTU
     unsafe {
         let x = bpf_xdp_adjust_head(
             ctx.ctx,
@@ -204,18 +210,20 @@ fn try_decap(ctx: XdpContext) -> Result<u32, ()> {
 }
 
 fn try_decap_ipv4(ctx: XdpContext) -> Result<u32, ()> {
+    // RFC 3378: Validate and remove EtherIP encapsulation for IPv4
     unsafe {
         let ip_hdr = ptr_at::<Ipv4Hdr>(&ctx, EthHdr::LEN)?;
-        // Check if it's EtherIP protocol
+        // Check if it's EtherIP protocol (97)
         if (*ip_hdr).protocol != IpProto::Etherip {
             return Ok(XDP_PASS);
         }
         
         let etherip_hdr = ptr_at::<EtherIPHdr>(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
+        // Verify EtherIP version is 3
         if (*etherip_hdr).version != 0x30 {
             return Ok(XDP_PASS);
         }
-        // delete ether + ipv4 + etherip header
+        // Remove outer headers: Ethernet (14) + IPv4 (20) + EtherIP (2) = 36 bytes
         let x = bpf_xdp_adjust_head(
             ctx.ctx,
             (EthHdr::LEN + Ipv4Hdr::LEN + EtherIPHdr::LEN) as i32,
@@ -229,18 +237,20 @@ fn try_decap_ipv4(ctx: XdpContext) -> Result<u32, ()> {
 }
 
 fn try_decap_ipv6(ctx: XdpContext) -> Result<u32, ()> {
+    // RFC 3378: Validate and remove EtherIP encapsulation for IPv6
     unsafe {
         let ip_hdr = ptr_at::<Ipv6Hdr>(&ctx, EthHdr::LEN)?;
-        // Check if it's EtherIP protocol
+        // Check if it's EtherIP protocol (97)
         if (*ip_hdr).next_hdr != IpProto::Etherip {
             return Ok(XDP_PASS);
         }
         
         let etherip_hdr = ptr_at::<EtherIPHdr>(&ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
+        // Verify EtherIP version is 3
         if (*etherip_hdr).version != 0x30 {
             return Ok(XDP_PASS);
         }
-        // delete ether + ipv6 + etherip header
+        // Remove outer headers: Ethernet (14) + IPv6 (40) + EtherIP (2) = 56 bytes
         let x = bpf_xdp_adjust_head(
             ctx.ctx,
             (EthHdr::LEN + Ipv6Hdr::LEN + EtherIPHdr::LEN) as i32,
@@ -273,10 +283,20 @@ unsafe fn ipv4_checksum(ip_hdr: *const Ipv4Hdr) -> Result<u16, ()> {
     Ok(!sum as u16)
 }
 
+// RFC 3378 EtherIP Header
+// 
+//  0                   1
+//  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |  Version  |      Reserved     |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//
+// Version: 4 bits, must be 3 (0x3)
+// Reserved: 12 bits, must be 0
 #[repr(C)]
 struct EtherIPHdr {
-    version: u8,
-    reserved: u8,
+    version: u8,   // Version (4 bits) + first 4 bits of reserved
+    reserved: u8,  // Last 8 bits of reserved
 }
 
 impl EtherIPHdr {
